@@ -1,0 +1,122 @@
+git:
+  depth: 3
+env:
+  global:
+  - secure: "ZksuOX1Aw+b0ExJxJxQV8DDy5u/eJITpnwpnaD7hcwRpFyvakTNGCMTkPWcMkEjy7eL6i7bn1CYqmygmGVKoW1ZfBcGskzy/YxwSxr2qIjqMvPP80Tz6yH6eXrKzsrdtAFRAUH/AZDqf2SfINYo58wgvciokYuFxaF9vG72ac7YRjxUlLVnaenf8F5TluwCRaDqG7aT2KnjpVpArseItm9D0RVFEhSS4qo9lcHwP7QS8MhlVK+qI9IpS+2Vzw7JDm2o+t9yE3PEhwY6aKOKXRRwJYVnzrms0czgJRIeOHRpmKQizmRTqBhlQ7Pex4EZ2TTYbgSkLJx4hYve3UOOmoGLsWI2fW6epRXmZ9kVtwkdt+epnH4Shs2ArjAZC2qFpmVTAwtJTcogiuzCrb0aKEci5PTRKIq0R0O3ioFmPDm1ndPc/nHWCOmqNJKsSf7/jpArQOed5LQk+Wq9t8dMSvk6UiV1nNzuj4uTc5UGmtUskT6eGVLl+MixJo+E+3iEv1XmEN7WYMYyfNNX65qiceECE3obfpdbK8x5culogWeKl7yrHYMVVO5qwFTbnKafS6pDxkXVTVva/zyM0S/KLv0oq8SeTXdErJmQApvYAv6dauFGr3vD2Bh7Ul6sDwbuSbnHKN+t0m6AcXAKB2UtzCtBb88lHIpjTzB8GccdjHvY="
+  - secure: "EgKvX76o4lvTKXpEB+4Hc00W3R5ppDX80IfnoE6GcaZohArm4YRW+SR3yZxXWTB6fhUq+boO1C0JNw9FxTBJaqIR5aqAF9+Q9+6IhWGLo7W8XEeq1HMFA7jdrAzh2yEN+LGxeVyju98Bz9KP8hgzf7BVVX0kC1QlwRVl86Ijwq57m7nd2dBaHrJZr5ShHxbSUre9C+L9DaVmrndAVoszuYWnqn7mj5AP8u6iQep5/gxhDocWY6aNaVqxrxHhwshbN6IkMaOX4gD/HWL+R1qpB9MJtnoH1Ql9XS2SgMWEnWOLMDjB2cM+4KCX3cX1h+2XSbkvNGhTFcOqhIVZ+q0etqqxBOFiPxneqpgZpz11u4nEq8lRVj6E3frd9voCAK9W6DOdDMsDHbri9oxa470IRpP/GIvMxUK71cMSdkD7W+8JKvmA4IAgrx5z9RjV1CXGjs0Ev9RakEU2GRwheDTS94vnIcRNRICWGWUe490X3lkQFlABPQCQj7R3TRfe6tQogm3ht3nIjw8Wq6Tswp9+X5NlIwG047N1aPMQzcPhW9J0YqA3X2nIYJU9XOWpmdQLVBkabkPEKJ+5sYrc09oTdPUQDIOQE6N8SinLqb8zbl6j53F+H2mbJMQaA0znhxm+2VzCIcumiemVNm/zO+Dq4QDRZu8X2hV2zbkQYdUBR1E="
+  - AWS_DEFAULT_REGION: "us-east-1"
+  - S3_PARAMS: '"--acl public-read --cache-control \"public,must-revalidate,proxy-revalidate,max-age=0\""'
+  - LINUX_PARAMS: '"-std=c99 -shared -z noexecstack -O3 -flto -fPIC -pthread -o libtcc.so -Wl,--no-undefined -Wl,--version-script,version.script"'
+
+matrix:
+  include:
+
+  # -----------------
+  - name: "Linux x64"
+  # -----------------
+    dist: xenial
+    language: c
+    compiler: gcc
+
+    addons:
+      apt:
+        packages:
+        - gcc-4.8
+
+    before_install:
+    - pip install --user awscli
+    - export PATH=$PATH:$HOME/.local/bin
+
+    script:
+    - ./configure --cc=gcc-4.8 --ar=gcc-ar-4.8
+    - make
+    - "gcc-4.8 -m64 $LINUX_PARAMS -Wl,--wrap,memcpy lib/wrap_memcpy.o *.o -ldl"
+    - strip libtcc.so
+    - "git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > revision.git"
+    - "aws s3 cp libtcc.so s3://build.lwjgl.org/nightly/linux/x64/ $S3_PARAMS"
+    - "aws s3 cp libtcc1.a s3://build.lwjgl.org/nightly/linux/x64/core/libtcc1-64.a $S3_PARAMS"
+    - "aws s3 cp revision.git s3://build.lwjgl.org/nightly/linux/x64/libtcc.so.git $S3_PARAMS"
+
+  # -----------------
+  - name: "Linux arm32"
+  # -----------------
+    dist: xenial
+    language: c
+    compiler: gcc
+
+    addons:
+      apt:
+        packages:
+        - gcc-4.8-arm-linux-gnueabihf
+        - libc6-dev-armhf-cross
+
+    before_install:
+    - pip install --user awscli
+    - export PATH=$PATH:$HOME/.local/bin
+
+    script:
+    - ./configure
+    - sudo make cross-arm install
+    - make clean
+    - ./configure --cross-prefix=arm-linux-gnueabihf- --cc=gcc-4.8 --ar=gcc-ar-4.8 --cpu=armv7a
+    - make tcc
+    - CROSS_TARGET=arm XTCC=/usr/local/bin/arm-tcc make
+    - rm arm-arm-*
+    - "arm-linux-gnueabihf-gcc-4.8 $LINUX_PARAMS arm-*.o -ldl"
+    - arm-linux-gnueabihf-strip libtcc.so
+    - "git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > revision.git"
+    - "aws s3 cp libtcc.so s3://build.lwjgl.org/nightly/linux/arm32/ $S3_PARAMS"
+    - "aws s3 cp arm-libtcc1.a s3://build.lwjgl.org/nightly/linux/arm32/core/libtcc1-32.a $S3_PARAMS"
+    - "aws s3 cp revision.git s3://build.lwjgl.org/nightly/linux/arm32/libtcc.so.git $S3_PARAMS"
+
+  # -----------------
+  - name: "Linux arm64"
+  # -----------------
+    dist: xenial
+    language: c
+    compiler: gcc
+
+    addons:
+      apt:
+        packages:
+        - gcc-4.8-aarch64-linux-gnu
+        - libc6-dev-arm64-cross
+
+    before_install:
+    - pip install --user awscli
+    - export PATH=$PATH:$HOME/.local/bin
+
+    script:
+    - ./configure
+    - sudo make cross-arm64 install
+    - make clean
+    - ./configure --cross-prefix=aarch64-linux-gnu- --cc=gcc-4.8 --ar=gcc-ar-4.8 --cpu=aarch64
+    - CROSS_TARGET=arm64 XTCC=/usr/local/bin/arm64-tcc make
+    - "aarch64-linux-gnu-gcc-4.8 $LINUX_PARAMS arm64-*.o -ldl"
+    - aarch64-linux-gnu-strip libtcc.so
+    - "git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > revision.git"
+    - "aws s3 cp libtcc.so s3://build.lwjgl.org/nightly/linux/arm64/ $S3_PARAMS"
+    - "aws s3 cp arm64-libtcc1.a s3://build.lwjgl.org/nightly/linux/arm64/core/libtcc1-64.a $S3_PARAMS"
+    - "aws s3 cp revision.git s3://build.lwjgl.org/nightly/linux/arm64/libtcc.so.git $S3_PARAMS"
+
+  # -----------------
+  - name: "macOS"
+  # -----------------
+    language: objective-c
+    osx_image: xcode11.1
+    compiler: clang
+
+    before_install:
+    - brew update
+
+    install:
+    - brew install awscli
+
+    script:
+    - ./configure --cc=clang
+    - make
+    - clang *.o -dynamiclib -Wl,-no_compact_unwind -mmacosx-version-min=10.9 -o libtcc.dylib -O3 -flto -fPIC
+    - "git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > revision.git"
+    - "aws s3 cp libtcc.dylib s3://build.lwjgl.org/nightly/macosx/x64/ $S3_PARAMS"
+    - "aws s3 cp libtcc.a s3://build.lwjgl.org/nightly/macosx/x64/core/ $S3_PARAMS"
+    - "aws s3 cp revision.git s3://build.lwjgl.org/nightly/macosx/x64/libtcc.dylib.git $S3_PARAMS"

@@ -2665,7 +2665,7 @@ static int elf_output_file(TCCState *s1, const char *filename)
 
     /* compute number of program headers */
     if (file_type == TCC_OUTPUT_DLL)
-        phnum = 3;
+        phnum = 4;
     else if (s1->static_link)
         phnum = 3;
     else {

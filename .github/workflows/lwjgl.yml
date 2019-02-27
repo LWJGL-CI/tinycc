@@ -1,0 +1,170 @@
+name: LWJGL Build
+
+on:
+  push:
+    branches:
+      - mob
+
+env:
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  S3_PARAMS: --acl public-read --cache-control "public,must-revalidate,proxy-revalidate,max-age=0"
+  LINUX_PARAMS: -std=c99 -shared -z noexecstack -O3 -flto -fPIC -pthread -o libtcc.so -Wl,--no-undefined -Wl,--version-script,version.script
+
+jobs:
+  linux-x64:
+    name: Linux x64
+    runs-on: ubuntu-16.04
+    env:
+      LWJGL_ARCH: x64
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 3
+      - run: sudo apt-get -yq install gcc-4.8
+        name: Install dependencies
+      - run: ./configure --cc=gcc-4.8 --ar=gcc-ar-4.8
+        name: Configure build
+      - run: |
+          make
+          gcc-4.8 -m64 $LINUX_PARAMS -Wl,--wrap,memcpy lib/wrap_memcpy.o *.o -ldl
+          strip libtcc.so
+        name: Build
+      - run: |
+          aws s3 cp libtcc.so s3://build.lwjgl.org/nightly/linux/x64/ $S3_PARAMS
+          aws s3 cp libtcc1.a s3://build.lwjgl.org/nightly/linux/x64/core/libtcc1-64.a $S3_PARAMS
+        name: Upload artifact
+      - run: |
+          git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > libtcc.so.git
+          aws s3 cp libtcc.so.git s3://build.lwjgl.org/nightly/linux/x64/ $S3_PARAMS
+        name: Upload git revision
+  linux-arm32:
+    name: Linux arm32
+    runs-on: ubuntu-16.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 3
+      - run: sudo apt-get -yq install gcc-4.8-arm-linux-gnueabihf libc6-dev-armhf-cross
+        name: Install dependencies
+      - run: |
+          ./configure
+          sudo make cross-arm install
+          make clean
+          ./configure --cross-prefix=arm-linux-gnueabihf- --cc=gcc-4.8 --ar=gcc-ar-4.8 --cpu=armv7a
+        name: Configure build
+      - run: |
+          make tcc
+          CROSS_TARGET=arm XTCC=/usr/local/bin/arm-tcc make
+          rm arm-arm-*
+          arm-linux-gnueabihf-gcc-4.8 $LINUX_PARAMS arm-*.o -ldl
+          arm-linux-gnueabihf-strip libtcc.so
+        name: Build
+      - run: |
+          aws s3 cp libtcc.so s3://build.lwjgl.org/nightly/linux/arm32/ $S3_PARAMS
+          aws s3 cp arm-libtcc1.a s3://build.lwjgl.org/nightly/linux/arm32/core/libtcc1-32.a $S3_PARAMS
+        name: Upload artifact
+      - run: |
+          git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > libtcc.so.git
+          aws s3 cp libtcc.so.git s3://build.lwjgl.org/nightly/linux/arm32/ $S3_PARAMS
+        name: Upload git revision
+  linux-arm64:
+    name: Linux arm64
+    runs-on: ubuntu-16.04
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 3
+      - run: sudo apt-get -yq install gcc-4.8-aarch64-linux-gnu libc6-dev-arm64-cross
+        name: Install dependencies
+      - run: |
+          ./configure
+          sudo make cross-arm64 install
+          make clean
+          ./configure --cross-prefix=aarch64-linux-gnu- --cc=gcc-4.8 --ar=gcc-ar-4.8 --cpu=aarch64
+        name: Configure build
+      - run: |
+          CROSS_TARGET=arm64 XTCC=/usr/local/bin/arm64-tcc make
+          aarch64-linux-gnu-gcc-4.8 $LINUX_PARAMS arm64-*.o -ldl
+          aarch64-linux-gnu-strip libtcc.so
+        name: Build
+      - run: |
+          aws s3 cp libtcc.so s3://build.lwjgl.org/nightly/linux/arm64/ $S3_PARAMS
+          aws s3 cp arm64-libtcc1.a s3://build.lwjgl.org/nightly/linux/arm64/core/libtcc1-64.a $S3_PARAMS
+        name: Upload artifact
+      - run: |
+          git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > libtcc.so.git
+          aws s3 cp libtcc.so.git s3://build.lwjgl.org/nightly/linux/arm64/ $S3_PARAMS
+        name: Upload git revision
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ARCH: [x64, arm64]
+        include:
+          - ARCH: x64
+            CC: CFLAGS="-O2 -mmacosx-version-min=10.9" LDFLAGS=-mmacosx-version-min=10.9
+            CPU: x86_64
+          - ARCH: arm64
+            CC: SDKROOT=$(xcrun -sdk macosx11.1 --show-sdk-path) MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx11.1 --show-sdk-platform-version) CFLAGS="-O2 -target aarch64-apple-darwin -arch arm64 -mmacosx-version-min=11.0" LDFLAGS="-target aarch64-apple-darwin -arch arm64 -mmacosx-version-min=11.0"
+            CPU: aarch64
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 3
+      - run: brew install make
+        name: Install dependencies
+      - run: ./configure --cc=clang --cpu=${{matrix.CPU}}
+        name: Configure build
+      - run: |
+          make
+          clang *.o -dynamiclib -Wl,-no_compact_unwind -mmacosx-version-min=10.9 -o libtcc.dylib -O3 -flto -fPIC
+        name: Build
+      - run: aws s3 cp libtcc.dylib s3://build.lwjgl.org/nightly/macosx/${{matrix.ARCH}}/ $S3_PARAMS
+        name: Upload artifact
+      - run: |
+          git log --first-parent --pretty=format:%H HEAD~2..HEAD~1 > libtcc.dylib.git
+          aws s3 cp libtcc.dylib.git s3://build.lwjgl.org/nightly/macosx/${{matrix.ARCH}}/ $S3_PARAMS
+        name: Upload git revision
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ARCH: [x86, x64]
+        include:
+          - ARCH: x86
+            MSVC_ARCH: amd64_x86
+            TARGET: 32
+          - ARCH: x64
+            MSVC_ARCH: amd64
+            TARGET: 64
+#          - ARCH: arm64
+#            MSVC_ARCH: amd64_arm64
+#            TARGET: 64?
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 3
+      - run: |
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" ${{matrix.MSVC_ARCH}}
+          cd win32
+          build-tcc.bat -c cl -t ${{matrix.TARGET}}
+        shell: cmd
+        name: Build
+      - run: |
+          aws s3 cp win32/libtcc.dll s3://build.lwjgl.org/nightly/windows/${{matrix.ARCH}}/tcc.dll ${{env.S3_PARAMS}}
+          aws s3 cp win32/lib/libtcc1-${{matrix.TARGET}}.a s3://build.lwjgl.org/nightly/windows/${{matrix.ARCH}}/core/
+        shell: cmd
+        name: Upload artifact
+      - run: |
+          git log --first-parent --pretty=format:%%H HEAD~2..HEAD~1 > tcc.dll.git
+          aws s3 cp tcc.dll.git s3://build.lwjgl.org/nightly/windows/${{matrix.ARCH}}/ ${{env.S3_PARAMS}}
+        shell: cmd
+        name: Upload git revision

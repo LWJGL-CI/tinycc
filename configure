@@ -220,7 +220,7 @@ esac
 
 # Checking for CFLAGS
 if test -z "$CFLAGS"; then
-    CFLAGS="-Wall -O2"
+    CFLAGS="-Wall -O3 -flto -fPIC -pthread -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DNDEBUG"
 fi
 
 if test "$mingw32" = "yes" ; then

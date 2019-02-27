@@ -1,0 +1,8 @@
+libtcc {
+    global:
+        tcc_*;
+        __wrap_memcpy;
+
+    # Hide everything else
+    local: *;
+};
